@@ -147,6 +147,7 @@ function closeRemovedDatapoints(removedDataPoints: any, onAllRemovedDatapointsCl
   return async.eachLimit(removedDataPoints, constants.LIMIT_NUMBER_PROCESS,
     ({changesDescriptor, context: externalContext}: any, onDatapointsForGivenMeasuresClosed: Function) => {
       const context = {
+        timeConcepts: externalContext.timeConcepts,
         dimensions: externalContext.dimensions,
         segregatedEntities: externalContext.segregatedEntities,
         segregatedPreviousEntities: externalContext.segregatedPreviousEntities,
@@ -177,6 +178,7 @@ function closeDatapointsOfPreviousVersion(changedDataPoints: any, onDatapointsOf
       };
 
       const context = {
+        timeConcepts: externalContext.timeConcepts,
         dimensions: externalContext.dimensionsOld,
         segregatedEntities: externalContext.segregatedEntities,
         segregatedPreviousEntities: externalContext.segregatedPreviousEntities,
@@ -193,8 +195,9 @@ function closeDatapointsOfPreviousVersion(changedDataPoints: any, onDatapointsOf
 }
 
 function closeDatapointsPerMeasure(rawDatapoint: any, externalContext: any, onDatapointsForGivenMeasuresClosed: Function): void {
-  const dimensionsEntityOriginIds = datapointsUtils.getDimensionsAsEntityOriginIds(rawDatapoint, {
+  const {dimensionsEntityOriginIds, timeDimension: time} = datapointsUtils.getDimensionsAsEntityOriginIds(rawDatapoint, {
     dimensions: externalContext.dimensions,
+    timeConcepts: externalContext.timeConcepts,
     segregatedEntities: externalContext.segregatedEntities,
     segregatedPreviousEntities: externalContext.segregatedPreviousEntities
   });
@@ -203,8 +206,8 @@ function closeDatapointsPerMeasure(rawDatapoint: any, externalContext: any, onDa
       logger.debug('Closing datapoint for measure', measure.gid, measure.originId);
 
       const options = {
+        time,
         measureOriginId: measure.originId,
-        dimensionsSize: _.size(externalContext.dimensions),
         dimensionsEntityOriginIds,
         datapointValue: rawDatapoint[measure.gid]
       };
