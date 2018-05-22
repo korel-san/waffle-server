@@ -1,5 +1,4 @@
 import * as path from 'path';
-import * as shell from 'shelljs';
 import * as fsExtra from 'fs-extra';
 import * as fs from 'fs';
 import { constants } from './ws.utils/constants';
@@ -8,6 +7,7 @@ import { logger } from './ws.config/log';
 
 import { keys, includes } from 'lodash';
 import { repositoryDescriptors as repositoryDescriptorsSource } from './ws.config/mongoless-repos.config';
+import { CheckoutResult, GitUtils } from './git-utils';
 
 type RepositoryStateDescriptor = {
   url: string;
@@ -18,18 +18,6 @@ type RepositoryStateDescriptor = {
   path?: string;
   time?: string;
   issue?: string;
-};
-
-type CheckoutResult = {
-  failedCommand?: string;
-  error?: string;
-  headCommitHash?: string;
-};
-
-type CommandResult = {
-  code: number;
-  stdout: string;
-  stderr: string;
 };
 
 type BranchIssue = { [key: string]: string };
@@ -45,85 +33,6 @@ function normalizeRepositoryDescriptorsSource(): void {
       repositoryDescriptorsSource[repository].master = ['HEAD'];
     }
   }
-}
-
-function getRepositoryNameByUrl(repoUrl: string): string {
-  try {
-    return repoUrl.split(':')[1].replace(/\.git$/, '');
-  } catch (error) {
-    return null;
-  }
-}
-
-async function checkoutToGivenCommit(repositoryStateDescriptor: RepositoryStateDescriptor): Promise<CheckoutResult> {
-  const execCommand = (command: string): Promise<CommandResult> =>
-    new Promise<CommandResult>((resolve: Function) => {
-      const gitCommand =
-        `git --git-dir=${repositoryStateDescriptor.path}/.git --work-tree=${repositoryStateDescriptor.path} ${command}`;
-
-      shell.exec(gitCommand, { async: true }, (code: number, stdout: string, stderr: string) =>
-        resolve({ code, stdout, stderr }));
-    });
-
-  const getHeadCommitHash = async (): Promise<CheckoutResult> => {
-    const command = `rev-parse --verify HEAD`;
-    const result = await execCommand(command);
-    const SHORT_COMMIT_LENGTH = 7;
-
-    if (result.code !== 0 || result.stdout.length < SHORT_COMMIT_LENGTH) {
-      return { failedCommand: command, error: result.stderr };
-    }
-
-    return { headCommitHash: result.stdout.substr(0, SHORT_COMMIT_LENGTH) };
-  };
-
-  const commands = [
-    `fetch --all --prune`,
-    `reset --hard origin/${repositoryStateDescriptor.branch}`,
-    `checkout ${repositoryStateDescriptor.branch}`,
-    `pull origin ${repositoryStateDescriptor.branch}`,
-    `clean -f -x`,
-    `checkout ${repositoryStateDescriptor.commit}`
-  ];
-
-  for (const command of commands) {
-    const result = await execCommand(command);
-
-    if (result.code !== 0) {
-      return new Promise<CheckoutResult>((resolve: Function) =>
-        resolve({ failedCommand: command, error: result.stderr }));
-    }
-  }
-
-  const headCommitHashResult = await getHeadCommitHash();
-
-  return new Promise<CheckoutResult>((resolve: Function) => {
-    if (headCommitHashResult.failedCommand || headCommitHashResult.error) {
-      return resolve({ failedCommand: headCommitHashResult.failedCommand, error: headCommitHashResult.error });
-    }
-
-    resolve({ headCommitHash: headCommitHashResult.headCommitHash });
-  });
-}
-
-async function initRepository(repositoryGitUrl: string, repositoryName: string): Promise<CommandResult> {
-  const masterRepoPath = path.resolve(reposPath, repositoryName, 'master');
-  const command = `git clone -v ${repositoryGitUrl} ${masterRepoPath}`;
-
-  return new Promise<CommandResult>((resolve: Function) => {
-    fsExtra.pathExists(masterRepoPath, (err: Error, exists: boolean) => {
-      if (err) {
-        return resolve({ code: 1, stdout: '', stderr: err });
-      }
-
-      if (exists) {
-        return resolve({ code: 0, stdout: '', stderr: '' });
-      }
-
-      shell.exec(command, { async: true }, (code: number, stdout: string, stderr: string) =>
-        resolve({ code, stdout, stderr }));
-    });
-  });
 }
 
 function makeBranchDraft(masterRepoPath: string, thisRepoPath: string): Promise<string> {
@@ -165,7 +74,7 @@ async function makeBranchesDrafts(repositoryGitUrl: string, repositoryName: stri
 
 export async function getRepositoryStateDescriptors(repository: string): Promise<RepositoryStateDescriptor[]> {
   const result: RepositoryStateDescriptor[] = [];
-  const repoName = getRepositoryNameByUrl(repository);
+  const repoName = GitUtils.getRepositoryNameByUrl(repository);
   const finishThisAction = (lockFileToRemove?: string) => {
     if (lockFileToRemove) {
       fsExtra.removeSync(lockFileToRemove);
@@ -175,17 +84,18 @@ export async function getRepositoryStateDescriptors(repository: string): Promise
   };
 
   if (!repoName) {
-    result.push({ url: repository, issue: 'unknown repository' });
+    result.push({url: repository, issue: 'unknown repository'});
 
     return finishThisAction();
   }
 
+  const gitUtils = new GitUtils(reposPath, repository, repoName);
   const lockFileName = repoName.replace(/\//, '-');
   const lockFilePath = path.resolve('.', 'ws.import', 'repos', `${lockFileName}.lock`);
 
   fsExtra.writeFileSync(lockFilePath, '');
 
-  const initRepositoryResult = await initRepository(repository, repoName);
+  const initRepositoryResult = await gitUtils.initRepository();
 
   if (initRepositoryResult.code !== 0) {
     result.push({
@@ -203,9 +113,7 @@ export async function getRepositoryStateDescriptors(repository: string): Promise
 
   for (const branch of branches) {
     for (const commit of repositoryDescriptorsSource[repository][branch]) {
-      const thisRepoPath = commit !== 'HEAD' ?
-        path.resolve(reposPath, repoName, `${branch}-${commit}`) :
-        path.resolve(reposPath, repoName, `${branch}`);
+      const thisRepoPath = GitUtils.getRepoPath(reposPath, repoName, branch, commit);
       const repositoryStateDescriptor: RepositoryStateDescriptor = {
         url: repository,
         name: repoName,
@@ -221,7 +129,8 @@ export async function getRepositoryStateDescriptors(repository: string): Promise
         continue;
       }
 
-      const commitResult: CheckoutResult = await checkoutToGivenCommit(repositoryStateDescriptor);
+      const commitResult: CheckoutResult =
+        await gitUtils.checkoutToGivenCommit(repositoryStateDescriptor.branch, repositoryStateDescriptor.commit);
 
       if (commitResult.failedCommand || commitResult.error) {
         repositoryStateDescriptor.issue = `${commitResult.failedCommand} ${commitResult.error}`;
@@ -268,9 +177,9 @@ function transformRepositoryStateDescriptorsArrayToHash(descriptors: RepositoryS
 }
 
 export async function mongolessImport(): Promise<void> {
-  if (config.IS_TESTING || config.IS_LOCAL) {
+  /*if (config.IS_TESTING || config.IS_LOCAL) {
     return Promise.resolve();
-  }
+  }*/
 
   normalizeRepositoryDescriptorsSource();
 
@@ -292,11 +201,8 @@ export async function mongolessImport(): Promise<void> {
   });
 }
 
-/*
 (async function () {
   const mongolessImportResult = await mongolessImport();
 
   console.log(`that's all: ${mongolessImportResult}`);
 })();
-*/
-
