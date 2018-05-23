@@ -53,7 +53,7 @@
     "unpublish-test": "NODE_ENV=test npm run unpublish",
     "unpublish-stage": "NODE_ENV=stage npm run unpublish",
     "unpublish-prod": "NODE_ENV=production npm run unpublish",
-    "mongoless-import": "ts-node mongoless-import.ts"
+    "mongoless-import": "tsc && ts-node mongoless-import.ts"
   },
   "dependencies": {
     "@types/async": "2.0.47",

@@ -1,15 +1,10 @@
 import * as path from 'path';
 import * as fsExtra from 'fs-extra';
-import * as fs from 'fs';
-import { constants } from './ws.utils/constants';
-import { config } from './ws.config/config';
-import { logger } from './ws.config/log';
-import { spawn } from 'child_process';
-import { keys, includes } from 'lodash';
+import { keys } from 'lodash';
 import { repositoryDescriptors as repositoryDescriptorsSource } from './ws.config/mongoless-repos.config';
 import { CheckoutResult, GitUtils } from './git-utils';
 
-let importProcess;
+process.stdin.resume();
 
 type RepositoryStateDescriptor = {
   url: string;
@@ -25,19 +20,8 @@ type RepositoryStateDescriptor = {
 type BranchIssue = { [key: string]: string };
 
 const reposPath = path.resolve('.', 'ws.import', 'repos');
-const repositories = keys(repositoryDescriptorsSource);
 
-function normalizeRepositoryDescriptorsSource(): void {
-  for (const repository of repositories) {
-    const branches = keys(repositoryDescriptorsSource[repository]);
-
-    if (!includes(branches, 'master')) {
-      repositoryDescriptorsSource[repository].master = ['HEAD'];
-    }
-  }
-}
-
-/*function makeBranchDraft(masterRepoPath: string, thisRepoPath: string): Promise<string> {
+function makeBranchDraft(masterRepoPath: string, thisRepoPath: string): Promise<string> {
   return new Promise<string>((resolve: Function) => {
     fsExtra.pathExists(thisRepoPath, (err: Error, exists: boolean) => {
       if (err) {
@@ -145,118 +129,44 @@ export async function getRepositoryStateDescriptors(repository: string): Promise
   }
 
   return finishThisAction(lockFilePath);
-}*/
+}
 
-function transformRepositoryStateDescriptorsArrayToHash(descriptors: RepositoryStateDescriptor[]): any {
-  return descriptors.reduce((result: any, descriptor: RepositoryStateDescriptor) => {
-    const commitBasedKey = `${descriptor.name}@${descriptor.branch}:${descriptor.commit || 'HEAD'}`;
 
-    if (descriptor.issue) {
-      const data = {
-        path: descriptor.path,
-        url: descriptor.url,
-        head: descriptor.head,
-        name: descriptor.name,
-        issue: descriptor.issue
+const queue = [];
+
+let busy = false;
+
+setInterval(async () => {
+  if (!busy) {
+    if (queue.length > 0) {
+      busy = true;
+
+      const repo = queue.shift();
+
+      await getRepositoryStateDescriptors(repo);
+
+      busy = false;
+
+      const o = {
+        action: 'repository-imported',
+        repo
       };
 
-      result[commitBasedKey] = data;
-    } else {
-      const headBasedKey = `${descriptor.name}@${descriptor.branch}:${descriptor.head}`;
-      const data = {
-        path: descriptor.path,
-        url: descriptor.url,
-        head: descriptor.head,
-        name: descriptor.name
-      };
-
-      result[commitBasedKey] = data;
-      result[headBasedKey] = data;
+      console.log(`#${JSON.stringify(o)}`);
     }
+  }
+}, 1000);
 
-    return result;
-  }, {});
-}
+process.stdin.on('data', async (data: string) => {
+  const commands = `${data}`.split('\n');
 
-export function mongolessImport(): void {
-  if (!importProcess) {
-    importProcess = spawn('node', ['mongoless-import-processing.js']);
-
-    importProcess.stdout.on('data', (data: string) => {
-      if (!data) {
-        return;
+  for (const command of commands) {
+    if (command) {
+      if (command.indexOf('#') !== 0) {
+        queue.push(command);
       }
-
-      const allFeedback = `${data}`.split('\n');
-
-      for (const feedback of allFeedback) {
-        if (!feedback || feedback.indexOf('#') !== 0) {
-          console.log(feedback);
-
-          return;
-        }
-
-        let content;
-
-        try {
-          content = JSON.parse(feedback.substr(1));
-        } catch (err) {
-          console.log(err, feedback);
-          return;
-        }
-
-        switch (content.action) {
-          case 'empty-queue':
-            importProcess.kill();
-            importProcess = null;
-            break;
-          case 'repository-imported':
-            console.log(content.repo + ' imported');
-            break;
-          case 'status':
-            break;
-          default:
-            break;
-        }
-      }
-    });
-
-    importProcess.stderr.on('data', (data: string) => console.log(`${data}`));
+    }
   }
 
-  normalizeRepositoryDescriptorsSource();
-
-  for (const repository of repositories) {
-    importProcess.stdin.write(repository + '\n');
-  }
-
-  /*normalizeRepositoryDescriptorsSource();
-
-  const repositoryStateDescriptors = [];
-
-  for (const repository of repositories) {
-    repositoryStateDescriptors.push(...await getRepositoryStateDescriptors(repository));
-  }
-
-  const reposDescriptorsFile = path.resolve(constants.WORKDIR, 'ws.import', 'repos', 'repositories-descriptors.json');
-  const reposDescriptorsFileContent =
-    JSON.stringify(transformRepositoryStateDescriptorsArrayToHash(repositoryStateDescriptors), null, 2);
-
-  return new Promise<void>((resolve: Function) => {
-    fs.writeFile(reposDescriptorsFile, reposDescriptorsFileContent, (err: Error) => {
-      logger.error(err);
-      resolve(err);
-    });
-  });*/
-
-}
-
-mongolessImport();
-
-/*
-(async function () {
-  const mongolessImportResult = await mongolessImport();
-
-  console.log(`that's all: ${mongolessImportResult}`);
-})();
-*/
+  // console.log(JSON.stringify({action: 'empty-queue'}));
+});
