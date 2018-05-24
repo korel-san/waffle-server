@@ -131,31 +131,71 @@ export async function getRepositoryStateDescriptors(repository: string): Promise
   return finishThisAction(lockFilePath);
 }
 
+function transformRepositoryStateDescriptorsArrayToHash(descriptors: RepositoryStateDescriptor[]): any {
+  return descriptors.reduce((result: any, descriptor: RepositoryStateDescriptor) => {
+    const commitBasedKey = `${descriptor.name}@${descriptor.branch}:${descriptor.commit || 'HEAD'}`;
+
+    if (descriptor.issue) {
+      const data = {
+        path: descriptor.path,
+        url: descriptor.url,
+        head: descriptor.head,
+        name: descriptor.name,
+        issue: descriptor.issue
+      };
+
+      result[commitBasedKey] = data;
+    } else {
+      const headBasedKey = `${descriptor.name}@${descriptor.branch}:${descriptor.head}`;
+      const data = {
+        path: descriptor.path,
+        url: descriptor.url,
+        head: descriptor.head,
+        name: descriptor.name
+      };
+
+      result[commitBasedKey] = data;
+      result[headBasedKey] = data;
+    }
+
+    return result;
+  }, {});
+}
 
 const queue = [];
 
+let interval;
 let busy = false;
 
-setInterval(async () => {
-  if (!busy) {
-    if (queue.length > 0) {
-      busy = true;
-
-      const repo = queue.shift();
-
-      await getRepositoryStateDescriptors(repo);
-
-      busy = false;
-
-      const o = {
-        action: 'repository-imported',
-        repo
-      };
-
-      console.log(`#${JSON.stringify(o)}`);
-    }
+const runImportFlow = () => {
+  if (interval) {
+    return;
   }
-}, 1000);
+
+  interval = setInterval(async () => {
+    if (!busy) {
+      if (queue.length > 0) {
+        busy = true;
+
+        const repo = queue.shift();
+        const repositoryStateDescriptors = await getRepositoryStateDescriptors(repo);
+
+        busy = false;
+
+        const o = {
+          action: 'repository-imported',
+          repo,
+          descriptors: transformRepositoryStateDescriptorsArrayToHash(repositoryStateDescriptors)
+        };
+
+        console.log(`#${JSON.stringify(o)}`);
+
+      } else {
+        console.log(`#${JSON.stringify({action: 'empty-queue'})}`);
+      }
+    }
+  }, 1000);
+};
 
 process.stdin.on('data', async (data: string) => {
   const commands = `${data}`.split('\n');
@@ -164,9 +204,8 @@ process.stdin.on('data', async (data: string) => {
     if (command) {
       if (command.indexOf('#') !== 0) {
         queue.push(command);
+        runImportFlow();
       }
     }
   }
-
-  // console.log(JSON.stringify({action: 'empty-queue'}));
 });
