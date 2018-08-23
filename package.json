@@ -25,6 +25,7 @@
     "unpublish:local": "NODE_ENV=local npm run unpublish",
     "unpublish:dev": "NODE_ENV=development npm run unpublish",
     "test": "npm run specs:minimalist",
+    "ag": "mocha --require ts-node/register --timeout 200000 --max-old-space-size=10000 test-bb/ag-concepts.spec.ts",
     "just-test-bb": "mocha --require ts-node/register --timeout 200000 --max-old-space-size=10000 test-bb/**/*.spec.ts",
     "test-bb": "echo [] > test-bb-options.tmp && npm run just-test-bb",
     "test-bb-custom": "ts-node test-bb/prompt.ts && npm run just-test-bb",
@@ -67,7 +68,7 @@
     "shelljs": "0.8.2",
     "typescript": "3.0.1",
     "urlon": "2.0.1",
-    "vizabi-ddfcsv-reader": "2.3.1"
+    "vizabi-ddfcsv-reader": "git://github.com/vizabi/vizabi-ddfcsv-reader.git#chore-refactor-tests"
   },
   "devDependencies": {
     "@types/chai": "4.1.3",
