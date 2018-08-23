@@ -19,7 +19,7 @@ import { GitUtils } from '../../ws.routes/ddfql/git-utils';
 import { DataSuite } from 'bb-tests-provider';
 
 const wsDevPath = 'https://waffle-server-dev.gapminderdev.org/api/ddf/ml-ql';
-const wsNewPath = 'http://localhost:3000/api/ddf/ql/urlon';
+const wsNewPath = 'http://localhost:3000/api/ddf/ql';
 const fixturesPath = './test-bb/fixtures';
 const datasetsConfig = chain(repositoryDescriptors)
   .cloneDeep()
