@@ -2,8 +2,8 @@ import * as path from 'path';
 import * as fsExtra from 'fs-extra';
 import { logger } from '../../ws.config/log';
 import { keys, includes } from 'lodash';
-import { repositoryDescriptors as repositoryDescriptorsSource } from '../../ws.config/mongoless-repos.config';
-import { CheckoutResult, GitUtils } from './git-utils';
+import {defaultRepositoryCommit, repositoryDescriptors as repositoryDescriptorsSource} from '../../ws.config/mongoless-repos.config';
+import { gitService } from './git-utils';
 
 process.stdin.resume();
 
@@ -61,7 +61,7 @@ async function makeBranchesDrafts(repositoryGitUrl: string, repositoryName: stri
       const masterRepoPath = path.resolve(reposPath, repositoryName, 'master');
       const thisRepoPath = commit !== 'HEAD' ?
         path.resolve(reposPath, repositoryName, `${branch}-${commit}`) :
-        path.resolve(reposPath, repositoryName, `${branch}`);
+        path.resolve(reposPath, repositoryName, `${branch}-${defaultRepositoryCommit}`);
       const issue = await makeBranchDraft(masterRepoPath, thisRepoPath);
 
       if (issue) {
@@ -75,7 +75,7 @@ async function makeBranchesDrafts(repositoryGitUrl: string, repositoryName: stri
 
 export async function getRepositoryStateDescriptors(repository: string): Promise<RepositoryStateDescriptor[]> {
   const result: RepositoryStateDescriptor[] = [];
-  const repoName = GitUtils.getRepositoryNameByUrl(repository);
+  const repoName = gitService.getRepositoryNameByUrl(repository);
   const finishThisAction = (lockFileToRemove?: string) => {
     if (lockFileToRemove) {
       fsExtra.removeSync(lockFileToRemove);
@@ -90,13 +90,13 @@ export async function getRepositoryStateDescriptors(repository: string): Promise
     return finishThisAction();
   }
 
-  const gitUtils = new GitUtils(reposPath, repository, repoName);
+  const gitService = new gitService(reposPath, repository, repoName);
   const lockFileName = repoName.replace(/\//, '-');
   const lockFilePath = path.resolve(reposPath, `${lockFileName}.lock`);
 
   fsExtra.writeFileSync(lockFilePath, '');
 
-  const initRepositoryResult = await gitUtils.initRepository();
+  const initRepositoryResult = await gitService.initRepository();
 
   if (initRepositoryResult.code !== 0) {
     result.push({
@@ -114,7 +114,7 @@ export async function getRepositoryStateDescriptors(repository: string): Promise
 
   for (const branch of branches) {
     for (const commit of repositoryDescriptorsSource[repository][branch]) {
-      const thisRepoPath = GitUtils.getRepoPath(reposPath, repoName, branch, commit);
+      const thisRepoPath = gitService.getRepoPath(reposPath, repoName, branch, commit);
       const repositoryStateDescriptor: RepositoryStateDescriptor = {
         url: repository,
         name: repoName,
@@ -131,7 +131,7 @@ export async function getRepositoryStateDescriptors(repository: string): Promise
       }
 
       const commitResult: CheckoutResult =
-        await gitUtils.checkoutToGivenCommit(repositoryStateDescriptor.branch, repositoryStateDescriptor.commit);
+        await gitService.checkoutToGivenCommit(repositoryStateDescriptor.branch, repositoryStateDescriptor.commit);
 
       if (commitResult.failedCommand || commitResult.error) {
         repositoryStateDescriptor.issue = `${commitResult.failedCommand} ${commitResult.error}`;
@@ -193,7 +193,7 @@ const runImportFlow = () => {
         busy = true;
 
         const repo = queue.shift();
-        const repoName = GitUtils.getRepositoryNameByUrl(repo);
+        const repoName = gitService.getRepositoryNameByUrl(repo);
 
         console.log(`#${JSON.stringify({ action: 'repository-is-importing', repoName })}`);
 

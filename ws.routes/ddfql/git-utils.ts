@@ -1,24 +1,14 @@
 import * as path from 'path';
 import * as shell from 'shelljs';
 import * as fsExtra from 'fs-extra';
+import {config} from '../../ws.config/config';
 
-export type CommandResult = {
-  code: number;
-  stdout: string;
-  stderr: string;
-};
+class GitUtils {
+  private SHORT_COMMIT_LENGTH: number = 7;
+  private sourceRoot: string = config.PATH_TO_SOURCE_REPOSITORIES;
+  private reposRoot: string = config.PATH_TO_DDF_REPOSITORIES;
 
-export type CheckoutResult = {
-  failedCommand?: string;
-  error?: string;
-  headCommitHash?: string;
-};
-
-export class GitUtils {
-  public constructor(private reposRoot: string, private repositoryGitUrl: string, private repositoryName: string) {
-  }
-
-  public static getRepositoryNameByUrl(repoUrl: string): string {
+  public getRepositoryNameByUrl(repoUrl: string): string {
     if (repoUrl.indexOf(':') === -1) {
       return repoUrl;
     }
@@ -30,54 +20,39 @@ export class GitUtils {
     }
   }
 
-  public static getRepoPath(reposRoot: string, repoName: string, branch: string, commit: string): string {
-    return commit !== 'HEAD' ?
-      path.resolve(reposRoot, repoName, `${branch}-${commit}`) :
-      path.resolve(reposRoot, repoName, `${branch}`);
+  public getRepoPath(dataset: string, branch: string, commit: string): string {
+    return path.resolve(this.reposRoot, dataset, `${branch}-${commit}`);
   }
 
-  public async initRepository(): Promise<CommandResult> {
-    const masterRepoPath = path.resolve(this.reposRoot, this.repositoryName, 'master-HEAD');
-    const command = `git clone -v ${this.repositoryGitUrl} ${masterRepoPath}`;
+  public getSourcePath(sourceName: string): string {
+    return path.resolve(this.sourceRoot, sourceName) ;
+  }
 
-    return new Promise<CommandResult>((resolve: Function) => {
-      fsExtra.pathExists(masterRepoPath, (err: Error, exists: boolean) => {
-        if (err) {
-          return resolve({code: 1, stdout: '', stderr: err});
+  public async initRepository(repoPath: string, repository: string): Promise<string | void> {
+    const command = `clone ${repository} ${repoPath}`;
+
+    const isFolderExisting = await this.checkNonexistentFolder(repoPath);
+
+    if (!isFolderExisting) {
+      return this.execCommand(repoPath, command);
+    }
+
+    return Promise.resolve();
+  }
+
+  public checkNonexistentFolder(folderPath: string): Promise<void> {
+    return new Promise ((resolve: Function, reject: Function) => {
+      fsExtra.pathExists(folderPath, (error: Error, exists: boolean) => {
+        if (error) {
+          return reject(error);
         }
 
-        if (exists) {
-          return resolve({code: 0, stdout: '', stderr: ''});
-        }
-
-        shell.exec(command, {async: true}, (code: number, stdout: string, stderr: string) =>
-          resolve({code, stdout, stderr}));
+        return resolve(exists);
       });
     });
   }
 
-  public async checkoutToGivenCommit(branch: string, commit: string): Promise<CheckoutResult> {
-    const repoPath = this.getStatefulRepoPath(branch, commit);
-    const execCommand = (command: string): Promise<CommandResult> =>
-      new Promise<CommandResult>((resolve: Function) => {
-        const gitCommand = `git --git-dir=${repoPath}/.git --work-tree=${repoPath} ${command}`;
-
-        shell.exec(gitCommand, {async: true}, (code: number, stdout: string, stderr: string) =>
-          resolve({code, stdout, stderr}));
-      });
-
-    const getHeadCommitHash = async (): Promise<CheckoutResult> => {
-      const command = `rev-parse --verify HEAD`;
-      const result = await execCommand(command);
-      const SHORT_COMMIT_LENGTH = 7;
-
-      if (result.code !== 0 || result.stdout.length < SHORT_COMMIT_LENGTH) {
-        return {failedCommand: command, error: result.stderr};
-      }
-
-      return {headCommitHash: result.stdout.substr(0, SHORT_COMMIT_LENGTH)};
-    };
-
+  public async checkoutToGivenCommit(repoPath: string, branch: string, commit: string): Promise<string | Error> {
     const commands = [
       `fetch --all --prune`,
       `reset --hard origin/${branch}`,
@@ -88,26 +63,50 @@ export class GitUtils {
     ];
 
     for (const command of commands) {
-      const result = await execCommand(command);
-
-      if (result.code !== 0) {
-        return new Promise<CheckoutResult>((resolve: Function) =>
-          resolve({failedCommand: command, error: result.stderr}));
-      }
+      await this.execCommand(repoPath, command);
     }
 
-    const headCommitHashResult = await getHeadCommitHash();
+    return await this.getHeadCommitHash(repoPath);
+  }
 
-    return new Promise<CheckoutResult>((resolve: Function) => {
-      if (headCommitHashResult.failedCommand || headCommitHashResult.error) {
-        return resolve({failedCommand: headCommitHashResult.failedCommand, error: headCommitHashResult.error});
-      }
+  public execCommand(repoPath: string, command: string): Promise<string> {
+    return new Promise<string>((resolve: Function) => {
+      const gitCommand = `git --git-dir=${repoPath}/.git --work-tree=${repoPath} ${command}`;
 
-      resolve({headCommitHash: headCommitHashResult.headCommitHash});
+      shell.exec(gitCommand, {silent: true, async: true}, (code: number, stdout: string, stderr: string) => {
+        if (code !== 0) {
+          throw new Error(`Command was failed: ${command}\nSTDERR: ${stderr}`);
+        }
+
+        return resolve(stdout);
+      });
     });
   }
 
-  private getStatefulRepoPath(branch: string, commit: string): string {
-    return GitUtils.getRepoPath(this.reposRoot, this.repositoryName, branch, commit);
+  public getShortenHash(hash: string): string {
+    return hash.substr(0, this.SHORT_COMMIT_LENGTH);
+  }
+
+  public async copySourceToTargetFolder(sourcePath: string, repoPath: string): Promise<string> {
+    const command = `cp -R -fi ${sourcePath} ${repoPath}`;
+
+    return new Promise<string>((resolve: Function) => {
+      shell.exec(command, {silent: true, async: true}, (code: number, stdout: string, stderr: string) => {
+        if (code !== 0) {
+          throw new Error(`Command was failed: ${command}\nSTDERR: ${stderr}`);
+        }
+
+        return resolve(stdout);
+      });
+    });
+  }
+
+  private async getHeadCommitHash(repoPath: string): Promise<string> {
+    const command = `rev-parse --verify HEAD`;
+
+    const hash: string = await this.execCommand(repoPath, command);
+    return this.getShortenHash(hash);
   }
 }
+
+export const gitService = new GitUtils();

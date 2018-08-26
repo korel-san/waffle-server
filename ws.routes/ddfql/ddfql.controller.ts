@@ -19,7 +19,7 @@ import * as fs from 'fs';
 import * as NodeRSA from 'node-rsa';
 import { spawn } from 'child_process';
 import { repositoryDescriptors as repositoryDescriptorsSource } from '../../ws.config/mongoless-repos.config';
-import { GitUtils } from './git-utils';
+import { gitService } from './git-utils';
 import { toDataResponse, toErrorResponse, WSRequest } from '../utils';
 
 const repositoriesUnderImporting = new Set<string>();
@@ -207,7 +207,7 @@ function createDdfqlController(serviceLocator: ServiceLocator): Application {
     const reqBody = _.get(req, 'body', {});
     const datasetParam = _.get(reqBody, 'dataset', config.DEFAULT_DATASET || defaultRepository);
     const [dataset, branchParam] = datasetParam.split('#');
-    const repoName = GitUtils.getRepositoryNameByUrl(dataset);
+    const repoName = gitService.getRepositoryNameByUrl(dataset);
 
     if (repositoriesUnderImporting.has(repoName)) {
       res.json(routesUtils.toErrorResponse(`dataset ${dataset} is temporary unavailable due to importing reason`, req, 'mongoless'));
@@ -231,7 +231,7 @@ function createDdfqlController(serviceLocator: ServiceLocator): Application {
     const datasetsConfig = _.chain(repositoryDescriptors)
       .cloneDeep()
       .mapKeys((value: object, key: string) => {
-        return GitUtils.getRepositoryNameByUrl(key);
+        return gitService.getRepositoryNameByUrl(key);
       })
       .mapValues((datasetConfig: object) => {
         if (_.isEmpty(datasetConfig)) {
@@ -245,7 +245,7 @@ function createDdfqlController(serviceLocator: ServiceLocator): Application {
       path: _path,
       datasetsConfig: Object.assign({
         default: {
-          dataset: GitUtils.getRepositoryNameByUrl(defaultRepository),
+          dataset: gitService.getRepositoryNameByUrl(defaultRepository),
           branch: defaultRepositoryBranch,
           commit: defaultRepositoryCommit
         }
@@ -275,7 +275,7 @@ function createDdfqlController(serviceLocator: ServiceLocator): Application {
     const [dataset, branchParam] = datasetParam.split('#');
     config.DEFAULT_DATASET = _.get(reqBody, 'datasetName', config.DEFAULT_DATASET || defaultRepository);
     config.DEFAULT_DATASET_VERSION = _.get(reqBody, 'version', config.DEFAULT_DATASET_VERSION || 'HEAD');
-    const repoName = GitUtils.getRepositoryNameByUrl(dataset);
+    const repoName = gitService.getRepositoryNameByUrl(dataset);
 
     if (repositoriesUnderImporting.has(repoName)) {
       res.json(routesUtils.toErrorResponse(`dataset ${dataset} is temporary unavailable due to importing reason`, req, 'mongoless'));

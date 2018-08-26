@@ -47,7 +47,7 @@ const environment = Object.freeze({
   SESSION_TIMEOUT: 60000,
 
   PATH_TO_DDF_REPOSITORIES: path.join(__dirname, '../ws-import'),
-  PATH_TO_DIFF_DDF_RESULT_FILE: path.join(__dirname, '../ws-import'),
+  PATH_TO_SOURCE_REPOSITORIES: path.join(__dirname, '../ddf'),
   DEFAULT_DATASETS: [],
 
   IS_MONITORING_NEEDED: true,

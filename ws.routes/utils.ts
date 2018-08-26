@@ -82,6 +82,7 @@ function parseJsonFromUrlQuery(req: WSRequest, res: express.Response, next: expr
 }
 
 function parseQueryFromUrlQuery(req: WSRequest, res: express.Response, next: express.NextFunction): void {
+  // TODO: async.tryEach
   const parsedUrl = url.parse(req.url);
   const query: string = _.isString(parsedUrl) ? parsedUrl : _.get(parsedUrl, 'query');
   let queryType = 'json';
@@ -151,7 +152,7 @@ function bodyFromUrlAssets(req: WSRequest, res: express.Response, next: express.
     const assetPathDescriptor = getAssetPathDescriptor(
       (req.appConfig as any).PATH_TO_DDF_REPOSITORIES,
       isRequestedDefaultAssets ? pathname.replace('default', context.dataset) : pathname,
-      isRequestedDefaultAssets && _.get(context, 'dataset')
+      isRequestedDefaultAssets && `${_.get(context, 'dataset')}`
     );
 
     if (assetPathDescriptor.assetsDir !== constants.ASSETS_EXPECTED_DIR) {
@@ -195,7 +196,7 @@ function getRepoInfoFromDataset(dataset: any): any {
     return null;
   }
 
-  const [ accountAndRepo, branch = 'master' ] = _.split(dataset.name, '#');
+  const [ accountAndRepo, branch = 'master-HEAD' ] = _.split(dataset.name, '#');
   const [ account, repo ] = _.split(accountAndRepo, '/');
 
   return {
